@@ -1,0 +1,14 @@
+.card-dragging {
+  opacity: 0.5;
+  transform: rotate(3deg);
+}
+
+.list-column {
+  min-height: 200px;
+}
+
+.drop-indicator {
+  height: 2px;
+  background-color: #3b82f6;
+  margin: 4px 0;
+}
