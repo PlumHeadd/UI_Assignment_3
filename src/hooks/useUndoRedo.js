@@ -1,10 +1,40 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 
 const MAX_HISTORY = 50
+const HISTORY_STORAGE_KEY = 'kanban_undo_history'
+const INDEX_STORAGE_KEY = 'kanban_undo_index'
 
 export function useUndoRedo(initialState) {
-  const [history, setHistory] = useState([initialState])
-  const [currentIndex, setCurrentIndex] = useState(0)
+  // Load history and index from localStorage if available
+  const loadPersistedState = () => {
+    try {
+      const savedHistory = localStorage.getItem(HISTORY_STORAGE_KEY)
+      const savedIndex = localStorage.getItem(INDEX_STORAGE_KEY)
+
+      if (savedHistory && savedIndex) {
+        const history = JSON.parse(savedHistory)
+        const index = parseInt(savedIndex, 10)
+        return { history, index }
+      }
+    } catch (error) {
+      console.warn('Failed to load undo/redo history:', error)
+    }
+    return { history: [initialState], index: 0 }
+  }
+
+  const { history: initHistory, index: initIndex } = loadPersistedState()
+  const [history, setHistory] = useState(initHistory)
+  const [currentIndex, setCurrentIndex] = useState(initIndex)
+
+  // Persist history and index to localStorage whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history))
+      localStorage.setItem(INDEX_STORAGE_KEY, currentIndex.toString())
+    } catch (error) {
+      console.warn('Failed to persist undo/redo history:', error)
+    }
+  }, [history, currentIndex])
 
   const pushState = useCallback((newState) => {
     setHistory((prev) => {

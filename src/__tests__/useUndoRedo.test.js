@@ -2,6 +2,11 @@ import { renderHook, act } from '@testing-library/react'
 import { useUndoRedo } from '../hooks/useUndoRedo'
 
 describe('useUndoRedo', () => {
+  beforeEach(() => {
+    // Clear localStorage before each test
+    localStorage.clear()
+  })
+
   test('should initialize with initial state', () => {
     const initialState = { value: 1 }
     const { result } = renderHook(() => useUndoRedo(initialState))

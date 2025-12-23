@@ -4,16 +4,22 @@ import { loadBoardData, saveBoardData } from '../services/storage'
 import * as backend from '../services/backend'
 import { isBackendEnabled } from '../utils/env'
 import { threeWayMerge } from '../utils/merge'
+import { useUndoRedo } from '../hooks/useUndoRedo'
 
 const BoardContext = createContext(null)
 const BoardDispatchContext = createContext(null)
+const UndoRedoContext = createContext(null)
 
-export { BoardContext, BoardDispatchContext }
+export { BoardContext, BoardDispatchContext, UndoRedoContext }
 
 export function BoardProvider({ children }) {
   const [state, dispatch] = useReducer(boardReducer, initialState)
   const [baseState, setBaseState] = useState({ lists: [], cards: [] })
   const syncInProgressRef = useRef(false)
+
+  // Undo/Redo using the tested hook
+  const { pushState, undo: undoHook, redo: redoHook, canUndo, canRedo } = useUndoRedo({ lists: [], cards: [] })
+  const isUndoRedoAction = useRef(false)
 
   useEffect(() => {
     const backendUrl = isBackendEnabled()
@@ -43,6 +49,26 @@ export function BoardProvider({ children }) {
       }
     }
   }, [])
+
+  // Track state changes and push to undo/redo history
+  useEffect(() => {
+    // Skip undo/redo actions to prevent adding them to history
+    if (isUndoRedoAction.current) {
+      isUndoRedoAction.current = false
+      return
+    }
+
+    // Skip if state is loading or empty
+    if (state.isLoading || (state.lists.length === 0 && state.cards.length === 0)) {
+      return
+    }
+
+    // Push current state to history
+    pushState({
+      lists: state.lists,
+      cards: state.cards
+    })
+  }, [state.lists, state.cards, state.isLoading, pushState])
 
   useEffect(() => {
     if (state.lists.length > 0 || state.cards.length > 0) {
@@ -159,6 +185,83 @@ const syncToBackend = async () => {
   }
 }
 
+  // Restore state to both localStorage and backend
+  const restoreStateToBackend = useCallback(async (restoredState) => {
+    if (!isBackendEnabled()) return
+
+    try {
+      // First, get current backend state
+      const backendData = await backend.fetchBoard()
+
+      // Delete all existing lists and cards
+      for (const list of backendData.lists) {
+        await backend.deleteList(list.id)
+      }
+
+      // Recreate lists from restored state
+      for (const list of restoredState.lists) {
+        await backend.createList(list)
+      }
+
+      // Recreate cards from restored state
+      for (const card of restoredState.cards) {
+        await backend.createCard(card)
+      }
+
+      console.log('✅ State restored to backend successfully')
+    } catch (error) {
+      console.warn('⚠️ Failed to restore state to backend:', error)
+    }
+  }, [])
+
+  // Undo to previous state using the hook
+  const undo = useCallback(async () => {
+    const previousState = undoHook()
+    if (!previousState) {
+      console.log('⚠️ Nothing to undo')
+      return false
+    }
+
+    console.log('↩️ Undoing to previous state...')
+    isUndoRedoAction.current = true
+
+    // Save to localStorage
+    saveBoardData(previousState)
+
+    // Restore to backend if enabled
+    await restoreStateToBackend(previousState)
+
+    // Update local state
+    dispatch({ type: ActionTypes.SET_BOARD_DATA, payload: previousState })
+    setBaseState(previousState)
+
+    return true
+  }, [undoHook, dispatch, restoreStateToBackend])
+
+  // Redo to next state using the hook
+  const redo = useCallback(async () => {
+    const nextState = redoHook()
+    if (!nextState) {
+      console.log('⚠️ Nothing to redo')
+      return false
+    }
+
+    console.log('↪️ Redoing to next state...')
+    isUndoRedoAction.current = true
+
+    // Save to localStorage
+    saveBoardData(nextState)
+
+    // Restore to backend if enabled
+    await restoreStateToBackend(nextState)
+
+    // Update local state
+    dispatch({ type: ActionTypes.SET_BOARD_DATA, payload: nextState })
+    setBaseState(nextState)
+
+    return true
+  }, [redoHook, dispatch, restoreStateToBackend])
+
   const addList = useCallback((title) => {
     dispatch({ type: ActionTypes.ADD_LIST, payload: { title } })
   }, []);
@@ -203,10 +306,19 @@ const syncToBackend = async () => {
     moveCard,
   }
 
+  const undoRedoValue = {
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+  }
+
   return (
     <BoardContext.Provider value={value}>
       <BoardDispatchContext.Provider value={dispatch}>
-        {children}
+        <UndoRedoContext.Provider value={undoRedoValue}>
+          {children}
+        </UndoRedoContext.Provider>
       </BoardDispatchContext.Provider>
     </BoardContext.Provider>
   )
